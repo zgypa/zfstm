@@ -55,6 +55,10 @@ elif [ "$1" == "mount" ]; then
 	ACTION="mount"
 elif [ "$1" == "unmount" ]; then
 	ACTION="unmount"
+elif [ "$1" == "backup" ]; then
+	ACTION="backup"
+elif [ "$1" == "snapshot" ]; then
+	ACTION="snapshot"
 else
 	print_help
 	exit 1
@@ -70,7 +74,7 @@ function unmount_backup_drive(){
 	echo "Unmounting backup drive"
 	# If normal nmount fail, resort to forceful
 	zpool export ${BKPPOOL} || zpool export -f ${BKPPOOL}
-	cryptsetup close ${MAPPER}
+	cryptsetup close ${MAPPER} && hdparm -y ${DEVICE}
 }
 
 function backup(){
@@ -100,10 +104,6 @@ elif [ "${ACTION}" == "snapshot" ]; then
 	fi
 	make_snapshot $2
 else
-	if [ -z $2 ]; then
-		print_help
-		exit 1
-	fi
 	mount_backup_drive || ( echo "Cannout mount backup drive. Exiting."; exit ) 
 	make_snapshot ${ZFSNAP_TTL}|| ( echo "Error while creating snapshot. Exiting."; exit )
 	backup || (echo "Error while creating backup" )
