@@ -9,14 +9,14 @@ Inspired by TimeMachine, zfstm makes use zfSnap, cryptsetup and zxfer to create 
 
 ### arguments
 
-hourly       = Open, mount, snapshot with 1d TTL, backup, unmount and close.
-daily        = Open, mount, snapshot with 1w TTL, backup, unmount and close.
-weekly       = Open, mount, snapshot with 1m TTL, backup, unmount and close.
-monthly      = Open, mount, snapshot with 1y TTL, backup, unmount and close.
-backup       = Backup external drive.
-mount        = Open and mount external drive.
-unmount      = Unmount and close external drive (ready to be unplugged).
-snapshot TTL = Take snapshot with TTK as time to live. 
+* hourly       = Open, mount, snapshot with 1d TTL, backup, unmount and close.
+* daily        = Open, mount, snapshot with 1w TTL, backup, unmount and close.
+* weekly       = Open, mount, snapshot with 1m TTL, backup, unmount and close.
+* monthly      = Open, mount, snapshot with 1y TTL, backup, unmount and close.
+* backup       = Backup external drive.
+* mount        = Open and mount external drive.
+* unmount      = Unmount and close external drive (ready to be unplugged).
+* snapshot TTL = Take snapshot with TTK as time to live. 
 
 
 ## Setup
