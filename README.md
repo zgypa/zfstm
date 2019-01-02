@@ -1,5 +1,5 @@
 # zfstm
-ZFS encrypted backup to external drive
+ZFS backups to encrypted external drive
 
 Inspired by TimeMachine, zfstm makes use zfSnap, cryptsetup and zxfer to create snapshots and copy them to an encrypted external drive. The tool will open, mount, take snapshot, replicate to external drive, then unmount and close LUKS volume at each run. Designed to run from cron with single parameter.
 
@@ -21,9 +21,26 @@ Inspired by TimeMachine, zfstm makes use zfSnap, cryptsetup and zxfer to create 
 
 ## Setup
 
-1. Have a source ZFS pool.
-1. Have a destination ZFS pool over LUKS setup.
-1. Use an OS that supports UUIDs to identify devices.
-1. Add a keyfile to open and close encrypted LUKS volume available.
+### Have a source ZFS pool
 
+I assume you have one setup already.
+
+### Have a destination ZFS pool over LUKS setup
+
+Do something like this:
+
+	sudo cryptsetup luksFormat -c aes-xts-plain64 -s 512 -h sha512 /dev/sdb
+	sudo cryptsetup open --type luks /dev/sdb luks-myvoluuid
+	sudo zpool create MYBACKUP /dev/mapper/luks-myvoluuid
+  
+### Use an OS that supports UUIDs to identify devices
+
+Using UUIDs is required to recognize when the correct drive is plugged in.
+
+### Add a keyfile to open and close encrypted LUKS volume available
+
+Do something like
+
+	sudo dd if=/dev/urandom of=/root/keyfile bs=1024 count=4
+	sudo cryptsetup luksAddKey /dev/mapepr/luks-myvoluuid /root/keyfile
 
