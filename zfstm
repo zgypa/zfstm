@@ -20,7 +20,7 @@ KEYFILE="/root/${BKPPOOL}.keyfile"
 UUID='7a418a09-520f-45e8-8a8f-102d2c6e57af'
 DEVICE="/dev/disk/by-uuid/${UUID}"
 MAPPER="luks-${UUID}"
-VERSION="0.1.0"
+VERSION="0.1.1"
 
 function print_help(){
 	    cat << EOF
