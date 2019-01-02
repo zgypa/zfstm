@@ -1,0 +1,112 @@
+#!/bin/bash
+
+# 
+# A tool to backup a workstation which is running mainly VM guests on a ZFS file system.
+# 
+# Makes use of zfSnap to take snapshots and zxfer to synchronize with external HDD
+# External HDD should be encrypted using LUKS
+# External HDD keyfile is saved locally on the worksation in plain text, because the
+#  data the keyfile is protecting is data found on this computer itself.
+# This script is called by cron in the cron.daily cron.hourly ... directories just by passing
+#  a daily, hourly, weekly or monthly parameter to it.
+# Changing backup device requires to manually change the UUID in this script.
+# The script automatically unmounts itself in order to be ready to just get unplugged and not suffer.
+# I have not tested how it survives a hard unpluggin of the backup drive.
+#
+
+BKPPOOL="TOEKNEEBKP3"
+SRCVOL="SSD970EVO500GB/withsnaps"
+KEYFILE="/root/${BKPPOOL}.keyfile"
+UUID='7a418a09-520f-45e8-8a8f-102d2c6e57af'
+DEVICE="/dev/disk/by-uuid/${UUID}"
+MAPPER="luks-${UUID}"
+VERSION="0.1.0"
+
+function print_help(){
+	    cat << EOF
+${0##*/} v${VERSION} by Toni Magni
+
+Syntax:
+${0##*/} argument
+
+ARGUMENTS:
+  hourly       = Open, mount, snapshot with 1d TTL, backup, unmount and close.
+  daily        = Open, mount, snapshot with 1w TTL, backup, unmount and close.
+  weekly       = Open, mount, snapshot with 1m TTL, backup, unmount and close.
+  monthly      = Open, mount, snapshot with 1y TTL, backup, unmount and close.
+  backup       = Backup external drive.
+  mount        = Open and mount external drive.
+  unmount      = Unmount and close external drive (ready to be unplugged).
+  snapshot TTL = Take snapshot with TTK as time to live. 
+
+
+EOF
+}
+
+if [ "$1" == "hourly" ]; then
+	ZFSNAP_TTL="1d"
+elif [ "$1" == "daily" ]; then
+	ZFSNAP_TTL="1w"
+elif [ "$1" == "weekly" ]; then
+	ZFSNAP_TTL="1m"
+elif [ "$1" == "monthly" ]; then
+	ZFSNAP_TTL="1y"
+elif [ "$1" == "mount" ]; then
+	ACTION="mount"
+elif [ "$1" == "unmount" ]; then
+	ACTION="unmount"
+else
+	print_help
+	exit 1
+fi
+
+function mount_backup_drive(){
+	echo "Opening and mounting ${DEVICE} with ${KEYFILE}"
+	cryptsetup open --type luks --key-file ${KEYFILE} "$DEVICE" "$MAPPER" 
+	zpool import ${BKPPOOL}
+}
+
+function unmount_backup_drive(){
+	echo "Unmounting backup drive"
+	# If normal nmount fail, resort to forceful
+	zpool export ${BKPPOOL} || zpool export -f ${BKPPOOL}
+	cryptsetup close ${MAPPER}
+}
+
+function backup(){
+	echo "Backing up to external pool"
+	if zfs list ${BKPPOOL} > /dev/null 2>&1; then 
+		zxfer -dFkPv -R ${SRCVOL} -D 'bar -s %%size%% --title %%title%%' ${BKPPOOL}
+	else 
+		echo "Drive not mounted"; 
+	fi
+}
+
+function make_snapshot(){
+	echo "Making Snapshot" 
+	/usr/sbin/zfSnap -d -a ${1} -r ${SRCVOL}
+}
+
+if [ "${ACTION}" == "mount" ]; then
+	mount_backup_drive
+elif [ "${ACTION}" == "unmount" ]; then
+	unmount_backup_drive
+elif [ "${ACTION}" == "backup" ]; then
+	backup
+elif [ "${ACTION}" == "snapshot" ]; then
+	if [ -z $2 ]; then
+		print_help
+		exit 1
+	fi
+	make_snapshot $2
+else
+	if [ -z $2 ]; then
+		print_help
+		exit 1
+	fi
+	mount_backup_drive || ( echo "Cannout mount backup drive. Exiting."; exit ) 
+	make_snapshot ${ZFSNAP_TTL}|| ( echo "Error while creating snapshot. Exiting."; exit )
+	backup || (echo "Error while creating backup" )
+	unmount_backup_drive || ( echo "Error while closing backup drive"; exit )
+fi
+
