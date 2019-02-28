@@ -153,20 +153,23 @@ function mount_backup_drive(){
 		debug "No keyfile specified. Assuming drive without encryption"
 	fi
 	if ! zpool list ${BKPPOOL} > /dev/null 2>&1; then 
+		debug "importing zpool ${BKPPOOL}"
 		zpool import ${BKPPOOL} || { error "Got exit code $? trying to import pool" && exit 4; }
 	else
-		debug "zpool already imported"
+		debug "zpool ${BKPPOOL} already imported"
 	fi
 }
 
 function unmount_backup_drive(){
-	debug "Unmounting backup drive"
-	# If normal nmount fail, resort to forceful
-	zpool export ${BKPPOOL} || zpool export -f ${BKPPOOL} || error "Cannot unmount ${BKPPOOL}" && exit 5 
+	debug "Unmounting backup pool ${BKPPOOL}"
+	# If normal unmount fail, resort to forceful
+	zpool export ${BKPPOOL} || zpool export -f ${BKPPOOL} || { error "Got exit code $? trying to unmount ${BKPPOOL}" && exit 5; } 
 	if [ $ENCRYPTION ]; then 
-		cryptsetup close ${MAPPER} && hdparm -y ${DEVICE} || error "Cannot close ${MAPPER}" && exit 6 
+		debug "Closing LUKS volume ${MAPPER}"
+		cryptsetup close ${MAPPER} || { error "Got exit code $? trying to close ${MAPPER}" && exit 6; }
 	fi
-	hdparm -y ${DEVICE}
+	debug "Spinning down ${DEVICE}"
+	hdparm -y ${DEVICE} || { error "Got exit code $? trying to spin down HDD." && exit 7; }
 }
 
 function backup(){
