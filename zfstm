@@ -14,21 +14,29 @@
 # I have not tested how it survives a hard unpluggin of the backup drive.
 #
 
-BKPPOOL="TOEKNEEBKP3"
-SRCVOL="SSD970EVO500GB/withsnaps"
-KEYFILE="/root/${BKPPOOL}.keyfile"
+# BKPPOOL="TOEKNEEBKP3"
+# SRCVOL="SSD970EVO500GB/withsnaps"
 LOCKFILE="/var/run/lock/${0##*/}.lock"
-UUID='7a418a09-520f-45e8-8a8f-102d2c6e57af'
-DEVICE="/dev/disk/by-uuid/${UUID}"
-MAPPER="luks-${UUID}"
-VERSION="0.1.2"
+# UUID='7a418a09-520f-45e8-8a8f-102d2c6e57af'
+VERBOSE=0
+VERSION="0.2.0"
 
 function print_help(){
 	    cat << EOF
 ${0##*/} v${VERSION} by Toni Magni
 
 Syntax:
-${0##*/} argument
+${0##*/} [--config filename] [--keyfile filename] --source sourcevolume --bkppool destintionpool 
+  --uuid device-uuid argument
+
+OPTIONS:
+  --source	= sourcezfsvolume
+  --bkppool	= a ZFS pool that will receieve the backups
+  --keyfile	= a keyfile to use to unlock a LUKS encrypted volume
+	           Default is ~/<bkppool>.keyfile
+  --uuid	= the UUID of the HDD to unlock and mount that would contain
+		   the destinationpool
+  --config	= config file to parse, instead of using arguments
 
 ARGUMENTS:
   hourly       = Open, mount, snapshot with 1d TTL, backup, unmount and close.
@@ -40,16 +48,47 @@ ARGUMENTS:
   unmount      = Unmount and close external drive (ready to be unplugged).
   snapshot TTL = Take snapshot with TTK as time to live. 
 
+EXAMPLE:
+${0##*/} --source SSD970EVO500GB/withsnaps --bkppool TOEKNEEBKP3 --uuid 7a418a09-520f-45e8-8a8f-102d2c6e57af hourly
 
 EOF
 }
+for i in "$@"; do
+	case "$1" in
+		'--verbose')
+			VERBOSE=1
+			shift 1
+			;;
+		'--source')
+			SRCVOL="$2"
+			shift 2
+			;;
+		'--bkppool')
+			BKPPOOL="$2"
+			shift 2
+			;;
+		'--keyfile')
+			KEYFILE="$2"
+			shift 2
+			;;
+		'--uuid')
+			UUID="$2"
+			shift 2
+			;;
+		'--config')
+			CONFIGFILE="$2"
+			shift 2
+			;;
+	esac
+done
 
-case "$1" in
-	'--source')
-		SRCVOL="$2"
-		shift 2
-		;;
-esac
+if [ ! -z "$CONFIGFILE" ]; then
+	. "$CONFIGFILE"
+fi
+
+if [ -z "$KEYFILE" ]; then
+	KEYFILE="/${HOME}/${BKPPOOL}.keyfile"
+fi
 
 if [ "$1" == "hourly" ]; then
 	ZFSNAP_TTL="1d"
@@ -68,41 +107,66 @@ elif [ "$1" == "backup" ]; then
 elif [ "$1" == "snapshot" ]; then
 	ACTION="snapshot"
 else
+	echo "ERROR: invalid ARGUMENT $1"
 	print_help
 	exit 1
 fi
 
-function is_locked(){
-	if [ -f ${LOCKFILE} ]; then
-		return true
-	else
-		return false
+function unlock(){
+	rm ${LOCKFILE} 2> /dev/null
+}
+
+function error(){
+	echo ERROR: $@
+	unlock
+}
+
+function debug(){
+	if [ $VERBOSE -eq 1 ]; then
+		echo DEBUG: $@
 	fi
 }
 
-function unlock(){
-	rm ${LOCKFILE}
+function is_locked(){
+	if [ -f ${LOCKFILE} ]; then
+		return 0
+	else
+		return 1
+	fi
 }
 
 function lock(){
-	if islocked; then
-		echo "Cannot lock. Already locked"
+	if is_locked; then
+		error "Cannot lock. Already locked"
 		exit 2
 	else
 		touch ${LOCKFILE}
 	fi
 }
+
 function mount_backup_drive(){
-	echo "Opening and mounting ${DEVICE} with ${KEYFILE}"
-	cryptsetup open --type luks --key-file ${KEYFILE} "$DEVICE" "$MAPPER" 
-	zpool import ${BKPPOOL}
+	if [ $ENCRYPTION ]; then
+		debug "Opening and mounting ${DEVICE} with ${KEYFILE}"
+		# cryptsetup exits with 5 when device is already open
+		cryptsetup open --type luks --key-file ${KEYFILE} "$DEVICE" "$MAPPER" || if [ $? -ne 5 ]; then { error "Got exit code $? trying to open LUKS volume" && exit 3 ; } fi
+	else
+		debug "No keyfile specified. Assuming drive without encryption"
+	fi
+	if ! zpool list ${BKPPOOL} > /dev/null 2>&1; then 
+		zpool import ${BKPPOOL} || { error "Got exit code $? trying to import pool" && exit 4; }
+	else
+		debug "zpool already imported"
+	fi
 }
 
 function unmount_backup_drive(){
-	echo "Unmounting backup drive"
+	debug "Unmounting backup drive"
 	# If normal nmount fail, resort to forceful
-	zpool export ${BKPPOOL} || zpool export -f ${BKPPOOL}
-	cryptsetup close ${MAPPER} && hdparm -y ${DEVICE}
+	zpool export ${BKPPOOL} || zpool export -f ${BKPPOOL} || error "Cannot unmount ${BKPPOOL}" && exit 5 
+	if [ $ENCRYPTION ]; then 
+		cryptsetup close ${MAPPER} && hdparm -y ${DEVICE} || error "Cannot close ${MAPPER}" && exit 6 
+	fi
+	hdparm -y ${DEVICE}
 }
 
 function backup(){
@@ -120,11 +184,23 @@ function make_snapshot(){
 }
 
 if is_locked; then
-	echo "Error: lockfile found"
+	error "lockfile found"
 	exit 2
 fi
 
 lock
+
+DEVICE="/dev/disk/by-uuid/${UUID}"
+MAPPER="luks-${UUID}"
+
+if [ -r "${KEYFILE}" ]; then
+	echo "Keyfile is readable. Proceeding with encryption"
+	ENCRYPTION=1
+else
+	echo "${KEYFILE} either not specified or not readable."
+	unset ENCRYPTION
+fi
+
 
 if [ "${ACTION}" == "mount" ]; then
 	mount_backup_drive
@@ -139,10 +215,10 @@ elif [ "${ACTION}" == "snapshot" ]; then
 	fi
 	make_snapshot $2
 else
-	mount_backup_drive || ( echo "Cannout mount backup drive. Exiting."; exit ) 
-	make_snapshot ${ZFSNAP_TTL}|| ( echo "Error while creating snapshot. Exiting."; exit )
-	backup || (echo "Error while creating backup" )
-	unmount_backup_drive || ( echo "Error while closing backup drive"; exit )
+	mount_backup_drive || { error "Cannot mount backup drive. Exiting." && exit 11; }  
+	make_snapshot ${ZFSNAP_TTL}|| { error "Error while creating snapshot. Exiting." && exit 12; }
+	backup || error "while creating backup" 
+	unmount_backup_drive || { error "Error while closing backup drive" && exit 13; }
 fi
 
 unlock
