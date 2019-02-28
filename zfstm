@@ -17,10 +17,11 @@
 BKPPOOL="TOEKNEEBKP3"
 SRCVOL="SSD970EVO500GB/withsnaps"
 KEYFILE="/root/${BKPPOOL}.keyfile"
+LOCKFILE="/var/run/lock/${0##*/}.lock"
 UUID='7a418a09-520f-45e8-8a8f-102d2c6e57af'
 DEVICE="/dev/disk/by-uuid/${UUID}"
 MAPPER="luks-${UUID}"
-VERSION="0.1.1"
+VERSION="0.1.2"
 
 function print_help(){
 	    cat << EOF
@@ -43,6 +44,13 @@ ARGUMENTS:
 EOF
 }
 
+case "$1" in
+	'--source')
+		SRCVOL="$2"
+		shift 2
+		;;
+esac
+
 if [ "$1" == "hourly" ]; then
 	ZFSNAP_TTL="1d"
 elif [ "$1" == "daily" ]; then
@@ -64,6 +72,26 @@ else
 	exit 1
 fi
 
+function is_locked(){
+	if [ -f ${LOCKFILE} ]; then
+		return true
+	else
+		return false
+	fi
+}
+
+function unlock(){
+	rm ${LOCKFILE}
+}
+
+function lock(){
+	if islocked; then
+		echo "Cannot lock. Already locked"
+		exit 2
+	else
+		touch ${LOCKFILE}
+	fi
+}
 function mount_backup_drive(){
 	echo "Opening and mounting ${DEVICE} with ${KEYFILE}"
 	cryptsetup open --type luks --key-file ${KEYFILE} "$DEVICE" "$MAPPER" 
@@ -91,6 +119,13 @@ function make_snapshot(){
 	/usr/sbin/zfSnap -d -a ${1} -r ${SRCVOL}
 }
 
+if is_locked; then
+	echo "Error: lockfile found"
+	exit 2
+fi
+
+lock
+
 if [ "${ACTION}" == "mount" ]; then
 	mount_backup_drive
 elif [ "${ACTION}" == "unmount" ]; then
@@ -110,3 +145,4 @@ else
 	unmount_backup_drive || ( echo "Error while closing backup drive"; exit )
 fi
 
+unlock
